@@ -33,6 +33,7 @@ def extract_primary_artist(artist_string):
         ' vs. ', ' vs ', ' Vs. ', ' Vs ', ' VS ',
         ' with ', ' With ',
         ' and ', ' And ',
+        ' & ',
         ' · ',
         ' x ',
         ' X ',
@@ -82,6 +83,82 @@ def find_all_folders(root):
                 matching_folders.append(full_path)
     
     return matching_folders
+
+def preview_moves(all_folders, artists, artist_albums, move_single_albums, root):
+    """Show preview of which folders will be moved and return the moves list."""
+    moves = []
+    skipped = []
+    
+    for folder_path in all_folders:
+        folder = os.path.basename(folder_path)
+        parts = folder.split(" - ", 1)
+        if len(parts) != 2:
+            skipped.append((folder, "no artist separator"))
+            continue
+        
+        artist = parts[0].strip()
+        primary_artist = extract_primary_artist(artist)
+        norm = normalize_name(primary_artist)
+        target_artist = artists[norm]
+        
+        # Skip single-album artists if option 2 was chosen
+        if not move_single_albums and len(artist_albums[norm]) == 1:
+            skipped.append((folder, "single album - keeping as-is"))
+            continue
+        
+        target_folder = os.path.join(root, sanitize(target_artist))
+        src = folder_path
+        dst = os.path.join(target_folder, sanitize(folder))
+        
+        # Get the current parent folder name
+        current_parent = os.path.basename(os.path.dirname(src))
+        
+        # Normalize paths for comparison - Windows treats trailing dots specially
+        # "E.L.I." and "E.L.I" are the same folder in Windows
+        src_parent = os.path.normpath(os.path.dirname(src)).rstrip('.')
+        target_folder_norm = os.path.normpath(target_folder).rstrip('.')
+        
+        # Also check if source parent folder name matches target artist (handles dots, etc)
+        src_parent_name = os.path.basename(os.path.dirname(src)).rstrip('.')
+        target_artist_sanitized = sanitize(target_artist).rstrip('.')
+        
+        # Check if the album artist matches the current parent folder name
+        # This handles cases like "Artist & Collab" albums already in "Artist & Collab" folder
+        album_artist_norm = normalize_name(artist)
+        parent_norm = normalize_name(current_parent)
+        
+        # Skip if already in correct location OR if album artist matches parent folder
+        if (src_parent == target_folder_norm or 
+            src_parent_name == target_artist_sanitized or
+            album_artist_norm == parent_norm):
+            skipped.append((folder, "already organized"))
+            continue
+        
+        # Relative paths for display
+        src_rel = os.path.relpath(src, root)
+        dst_rel = os.path.relpath(dst, root)
+        
+        moves.append((src, dst, target_artist, folder, src_rel, dst_rel))
+    
+    # Only show preview if there are folders to move
+    if moves:
+        print("\n" + "="*60)
+        print("FOLDERS THAT WILL BE MOVED:")
+        print("="*60 + "\n")
+        
+        for src, dst, target_artist, folder, src_rel, dst_rel in moves:
+            print(f"  {src_rel}")
+            print(f"  -> {dst_rel}\n")
+    
+    print(f"\n{'='*60}")
+    print(f"Total folders to move: {len(moves)}")
+    if skipped:
+        already_organized = sum(1 for _, reason in skipped if reason == "already organized")
+        if already_organized > 0:
+            print(f"Already organized (will skip): {already_organized}")
+    print(f"{'='*60}\n")
+    
+    return moves
 
 # --- Main Logic ---
 if len(sys.argv) < 2:
@@ -152,70 +229,14 @@ if single_album_count > 0:
         print("\nInvalid choice. Please enter 1 or 2.\n")
     
     move_single_albums = (choice == "1")
-    print()
 else:
     move_single_albums = True
 
-# Show what will be moved
-print("Preview of moves:\n")
-moves = []
-skipped = []
-
-for folder_path in all_folders:
-    folder = os.path.basename(folder_path)
-    parts = folder.split(" - ", 1)
-    if len(parts) != 2:
-        skipped.append((folder, "no artist separator"))
-        continue
-    
-    artist = parts[0].strip()
-    primary_artist = extract_primary_artist(artist)
-    norm = normalize_name(primary_artist)
-    target_artist = artists[norm]
-    
-    # Skip single-album artists if option 2 was chosen
-    if not move_single_albums and len(artist_albums[norm]) == 1:
-        skipped.append((folder, "single album - keeping as-is"))
-        continue
-    
-    target_folder = os.path.join(ROOT, sanitize(target_artist))
-    src = folder_path
-    dst = os.path.join(target_folder, sanitize(folder))
-    
-    # Normalize paths for comparison - Windows treats trailing dots specially
-    # "E.L.I." and "E.L.I" are the same folder in Windows
-    src_parent = os.path.normpath(os.path.dirname(src)).rstrip('.')
-    target_folder_norm = os.path.normpath(target_folder).rstrip('.')
-    
-    # Also check if source parent folder name matches target artist (handles dots, etc)
-    src_parent_name = os.path.basename(os.path.dirname(src)).rstrip('.')
-    target_artist_sanitized = sanitize(target_artist).rstrip('.')
-    
-    # Skip if already in correct location
-    if src_parent == target_folder_norm or src_parent_name == target_artist_sanitized:
-        skipped.append((folder, "already organized"))
-        continue
-    
-    # Relative paths for display
-    src_rel = os.path.relpath(src, ROOT)
-    dst_rel = os.path.relpath(dst, ROOT)
-    
-    moves.append((src, dst, target_artist, folder, src_rel, dst_rel))
-    print(f"  {src_rel}")
-    print(f"  -> {dst_rel}\n")
-
-if skipped:
-    print(f"\nSkipping {len(skipped)} folders:")
-    for folder, reason in skipped:
-        print(f"  - '{folder}' ({reason})")
-
-print(f"\n{'='*60}")
-print(f"Total folders to move: {len(moves)}")
-print(f"Total folders to skip: {len(skipped)}")
-print(f"{'='*60}\n")
+# Show preview of moves
+moves = preview_moves(all_folders, artists, artist_albums, move_single_albums, ROOT)
 
 if not moves:
-    print("Nothing to move!")
+    print("Nothing to move! All folders are already organized.")
     print("Press any key to exit...")
     wait_for_key()
     exit(0)
